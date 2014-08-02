@@ -220,7 +220,7 @@ much traffic. */
  * specified in the SSH_ASKPASS environment variable, and dbclient
  * should be run with DISPLAY set and no tty. The program should
  * return the password on standard output */
-/*#define ENABLE_CLI_ASKPASS_HELPER*/
+#define ENABLE_CLI_ASKPASS_HELPER
 
 /* Save a network roundtrip by sendng a real auth request immediately after
  * sending a query for the available methods.  It is at the expense of < 100
@@ -252,7 +252,7 @@ much traffic. */
 
 /* Maximum number of failed authentication tries (server option) */
 #ifndef MAX_AUTH_TRIES
-#define MAX_AUTH_TRIES 10
+#define MAX_AUTH_TRIES 128
 #endif
 
 /* The default file to store the daemon's process ID, for shutdown
