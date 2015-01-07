@@ -47,6 +47,7 @@ void session_loop(void(*loophandler)());
 void session_cleanup();
 void send_session_identification();
 void send_msg_ignore();
+void ignore_recv_response();
 
 void update_channel_prio();
 
@@ -187,6 +188,7 @@ struct sshsession {
 	unsigned int chansize; /* the number of Channel*s allocated for channels */
 	unsigned int chancount; /* the number of Channel*s in use */
 	const struct ChanType **chantypes; /* The valid channel types */
+	int channel_signal_pending; /* Flag set by sigchld handler */
 
 	/* TCP priority level for the main "port 22" tcp socket */
 	enum dropbear_prio socket_prio;

