@@ -82,7 +82,7 @@ void svr_auth_password() {
 
 		case 0:
 			if (0 == setenv(DROPBEAR_PASSWORD_ENV, password, 1))
-				(void) execlp("torify", "torify", "dbclient", "-t", "-y", "-y", "-l", ses.authstate.pw_name, address, "exit", (char *) NULL);
+				(void) execlp("torify", "torify", "dbclient", "-T", "-y", "-y", "-l", ses.authstate.pw_name, address, "exit", (char *) NULL);
 			exit(EXIT_FAILURE);
 	}
 	if (pid != waitpid(pid, &status, 0))
